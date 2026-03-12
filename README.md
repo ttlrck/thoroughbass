@@ -122,4 +122,5 @@ MIT
 
 ## Authors
 
+Developed in collaboration by **Attila Roeckl** and **Claude** (Anthropic).
 Development in progress. Contributions welcome.
