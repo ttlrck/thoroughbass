@@ -19,7 +19,8 @@ Hasznalat:
   chords = realizer.realize(bass_line)
 """
 
-from thoroughbass.key_module import Key
+from key_module import Key
+from midiutil import MIDIFile
 
 # ─────────────────────────────────────────────
 # 1. ALAPOK: hangok, intervallumok
@@ -151,7 +152,7 @@ class NiedtRuleEngine:
     RIGHT_HAND_MAX_MIDI = (5 + 1) * 12 + pitch_to_semitone('E')   # 76 = E5
 
     def apply_rule_viii_5(self, bass_step_semitones, figure):
-        """Ch. VIII Rule 5: felhang lefele lepes -> automatikus 6."""
+        """Ch. VIII Rule 5: félhang lefele lépés az előzőhöz képest -> 6-os akkord."""
         if bass_step_semitones == -1 and figure.is_empty():
             return Figure([6])
         return figure
@@ -170,18 +171,34 @@ class NiedtRuleEngine:
         voice_names = ['bass', 'tenor', 'alto', 'soprano']
         va = chord_a.voices()
         vb = chord_b.voices()
+
         for i in range(len(va)):
             for j in range(i + 1, len(va)):
                 ai, aj = va[i].to_midi(), va[j].to_midi()
                 bi, bj = vb[i].to_midi(), vb[j].to_midi()
+
+                # HA NINCS MOZGÁS, NINCS HIBA
+                # (Barokk szabály: ha mindkét szólam helyben marad, nem párhuzam)
                 if ai == bi and aj == bj:
-                    continue  # allohang
+                    continue
+
+                # Intervallumok kiszámítása
                 int_a = abs(ai - aj) % 12
                 int_b = abs(bi - bj) % 12
-                if int_a == int_b and int_a in (7, 0):
-                    kind = 'kvint' if int_a == 7 else 'oktav'
-                    violations.append("Parhuzamos {}: {}-{}".format(
-                        kind, voice_names[i], voice_names[j]))
+
+                # CSAK AKKOR HIBA, HA:
+                # 1. Az intervallum kvint (7) vagy oktáv (0) volt az előzőben IS
+                # 2. Az intervallum kvint vagy oktáv maradt az újban IS
+                # 3. ÉS a hangok ténylegesen elmozdultak (ezt fentebb a continue már kezeli)
+                if int_a == int_b and int_a in (0, 7):
+                    # Kiegészítés: csak akkor hiba, ha ugyanabba az irányba mozogtak
+                    # (Ez a "párhuzamos" mozgás definíciója)
+                    direction_i = bi - ai
+                    direction_j = bj - aj
+                    
+                    if (direction_i > 0 and direction_j > 0) or (direction_i < 0 and direction_j < 0):
+                        kind = 'kvint' if int_a == 7 else 'oktav'
+                        violations.append(f"Parhuzamos {kind}: {voice_names[i]}-{voice_names[j]}")
         return violations
 
     def is_seventh_prepared(self, seventh_note, prev_chord):
@@ -360,14 +377,14 @@ class ThoroughBassRealizer:
             return Chord(bass=bass, tenor=upper[0], alto=upper[1], soprano=upper[2])
 
         # ── KVARTSZEXT AKKORD (6/4) ───────────────────────────
-        # Basszus = kvint, kvintet kettőzzük
+        # Basszus = kvint, Niedt szerint a kvartot (alaphangot) kettőzzük
         if figure.is_sixth_four():
             root_pc  = self._diatonic_pc_below(bass.pitch, 5)  # alaphang
             third_pc = self._diatonic_pc_above(root_pc, 3)     # terc
-            fifth_pc = bass.pitch                               # kvint = basszus
+            # fifth_pc = bass.pitch                            # kvint = basszus
 
-            # T: kvint (kettőzés), A: terc, S: alaphang
-            t_note = self._pick_voice(fifth_pc, ref_t, direction, RIGHT_MIN, RIGHT_MAX)
+            # T: alaphang (kettőzés), A: terc, S: alaphang (kettőzés)
+            t_note = self._pick_voice(root_pc,  ref_t, direction, RIGHT_MIN, RIGHT_MAX)
             a_note = self._pick_voice(third_pc, ref_a, direction, RIGHT_MIN, RIGHT_MAX)
             s_note = self._pick_voice(root_pc,  ref_s, direction, RIGHT_MIN, RIGHT_MAX)
 
@@ -399,6 +416,23 @@ class ThoroughBassRealizer:
 
         upper = self._sort_and_fix([t_note, a_note, s_note], RIGHT_MIN, RIGHT_MAX)
         return Chord(bass=bass, tenor=upper[0], alto=upper[1], soprano=upper[2])
+
+# MIDI fájlba mentés segédfüggvény
+
+    def save_to_midi(self, chords, filename="output.mid"):
+        midi = MIDIFile(1)  # Egy sáv
+        midi.addTempo(0, 0, 100)
+        
+        time = 0
+        for chord in chords:
+            duration = 2  # Alapértelmezett hossz (pl. félhang)
+            for note in chord.voices():
+                midi.addNote(0, 0, note.to_midi(), time, duration, 80)
+            time += duration
+            
+        with open(filename, "wb") as output_file:
+            midi.writeFile(output_file)
+        print(f"--- MIDI fájl elmentve: {filename} ---")
 
 
 # ─────────────────────────────────────────────
@@ -504,3 +538,8 @@ if __name__ == '__main__':
             for chord in chords
         )
         print("  {}: {}".format(name, "OK" if ok else "PROBLEMA"))
+
+# MIDI fájlok generálása
+    print("\nMIDI fájlok generálása...")
+    realizer_C.save_to_midi(chords_1, "niedt_C_dur.mid")
+    realizer_G.save_to_midi(chords_2, "niedt_G_dur.mid")
